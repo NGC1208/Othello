@@ -18,7 +18,8 @@ public static class RulesSelfTest
         TestInitialLegalMoves();
         TestSingleDirectionFlip();
         TestMultipleDirectionFlip();
-        TestCpuAlwaysReturnsLegalMove();
+        TestCpuDifficulties();
+        TestCpuIsDeterministic();
         Console.WriteLine("SELF_TEST_OK");
     }
 
@@ -68,13 +69,36 @@ public static class RulesSelfTest
         Assert(moves.Count > 0, "複数手進行後も合法手を取得");
     }
 
-    /// <summary>CPUが初期盤面で必ず合法手を返すことを確認します。</summary>
-    private static void TestCpuAlwaysReturnsLegalMove()
+    /// <summary>全難易度の探索深度と合法手選択を確認します。</summary>
+    private static void TestCpuDifficulties()
     {
         var board = new BoardState();
-        var cpu = new CpuPlayer(randomSeed: 1, timeLimitSeconds: 0.5, maxDepth: 3);
-        var move = cpu.ChooseMove(board, Disc.Black);
-        Assert(move.HasValue && board.IsLegalMove(move.Value, Disc.Black), "CPUは合法手を返す");
+        var cases = new[]
+        {
+            (CpuDifficulty.Beginner, 1),
+            (CpuDifficulty.Intermediate, 2),
+            (CpuDifficulty.Advanced, 3)
+        };
+
+        foreach (var testCase in cases)
+        {
+            var cpu = new CpuPlayer(testCase.Item1);
+            var move = cpu.ChooseMove(board, Disc.Black);
+            Assert(cpu.MaxDepth == testCase.Item2, $"{testCase.Item1}の探索深度");
+            Assert(move.HasValue && board.IsLegalMove(move.Value, Disc.Black), $"{testCase.Item1}は合法手を返す");
+        }
+    }
+
+    /// <summary>同じ盤面と難易度なら同じ手を選ぶことを確認します。</summary>
+    private static void TestCpuIsDeterministic()
+    {
+        var board = new BoardState();
+        foreach (var difficulty in Enum.GetValues<CpuDifficulty>())
+        {
+            var first = new CpuPlayer(difficulty).ChooseMove(board, Disc.Black);
+            var second = new CpuPlayer(difficulty).ChooseMove(board, Disc.Black);
+            Assert(first == second, $"{difficulty}の着手は再現可能");
+        }
     }
 
     /// <summary>

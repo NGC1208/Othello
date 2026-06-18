@@ -5,8 +5,17 @@ using System.Diagnostics;
 namespace Othello;
 
 /// <summary>
-/// α-β枝刈り付きミニマックス法でCPUの着手を選びます。
-/// 深さ1から3まで反復深化し、制限時間内に完了した最深探索の結果を採用します。
+/// プレイヤーが選択できるCPU難易度です。
+/// </summary>
+public enum CpuDifficulty
+{
+    Beginner,
+    Intermediate,
+    Advanced
+}
+
+/// <summary>
+/// 難易度に応じた評価関数とα-β枝刈り付きミニマックス法でCPUの着手を選びます。
 /// </summary>
 public sealed class CpuPlayer
 {
@@ -16,29 +25,34 @@ public sealed class CpuPlayer
         new(0, 0), new(7, 0), new(0, 7), new(7, 7)
     };
 
-    // 同評価の候補から手を選ぶための乱数です。テスト時はシードを固定できます。
-    private readonly Random _random;
     private readonly TimeSpan _timeLimit;
-    private readonly int _maxDepth;
     private Stopwatch _stopwatch = new();
     private bool _timedOut;
 
-    /// <summary>
-    /// CPU探索器を生成します。
-    /// </summary>
-    /// <param name="randomSeed">再現可能なテストで使用する乱数シードです。</param>
-    /// <param name="timeLimitSeconds">1着手あたりの思考時間上限です。</param>
-    /// <param name="maxDepth">CPUと人間を合わせて何着手先まで読むかを指定します。</param>
-    public CpuPlayer(int? randomSeed = null, double timeLimitSeconds = 0.5, int maxDepth = 3)
+    /// <summary>現在選択されている難易度です。</summary>
+    public CpuDifficulty Difficulty { get; }
+
+    /// <summary>難易度に対応する最大探索深度です。</summary>
+    public int MaxDepth => Difficulty switch
     {
-        _random = randomSeed.HasValue ? new Random(randomSeed.Value) : new Random();
+        CpuDifficulty.Beginner => 1,
+        CpuDifficulty.Intermediate => 2,
+        _ => 3
+    };
+
+    /// <summary>
+    /// 指定難易度のCPU探索器を生成します。
+    /// </summary>
+    public CpuPlayer(CpuDifficulty difficulty, double timeLimitSeconds = 0.5)
+    {
+        Difficulty = difficulty;
         _timeLimit = TimeSpan.FromSeconds(timeLimitSeconds);
-        _maxDepth = maxDepth;
     }
 
     /// <summary>
     /// 指定盤面からCPUの最善手を選びます。
     /// 合法手がない場合はnullを返します。
+    /// 同評価の場合は左上から右下への座標順で最初の手を選びます。
     /// </summary>
     public BoardPosition? ChooseMove(BoardState board, Disc cpuDisc)
     {
@@ -46,79 +60,94 @@ public sealed class CpuPlayer
         if (legalMoves.Count == 0)
             return null;
 
-        var fallback = legalMoves[0];
-        var bestMoves = new List<BoardPosition> { fallback };
+        SortByCoordinate(legalMoves);
+        var bestMove = legalMoves[0];
         _stopwatch = Stopwatch.StartNew();
 
-        // 浅い探索を必ず先に完了させることで、途中で時間切れになっても有効な手を返せます。
-        for (var depth = 1; depth <= _maxDepth; depth++)
+        // 浅い探索を必ず先に完了させることで、時間切れでも合法な予備手を返します。
+        for (var depth = 1; depth <= MaxDepth; depth++)
         {
             _timedOut = false;
             var depthBest = SearchRoot(board, cpuDisc, depth);
             if (_timedOut)
                 break;
 
-            if (depthBest.Count > 0)
-                bestMoves = depthBest;
+            if (depthBest.HasValue)
+                bestMove = depthBest.Value;
         }
 
         _stopwatch.Stop();
-        return bestMoves[_random.Next(bestMoves.Count)];
+        return bestMove;
     }
 
     /// <summary>
-    /// 現在の探索深度における最善の着手候補をすべて返します。
+    /// 現在の探索深度で最も評価が高い着手を返します。
     /// </summary>
-    private List<BoardPosition> SearchRoot(BoardState board, Disc cpuDisc, int depth)
+    private BoardPosition? SearchRoot(BoardState board, Disc cpuDisc, int depth)
     {
         var bestScore = int.MinValue;
-        var bestMoves = new List<BoardPosition>();
+        BoardPosition? bestMove = null;
+        var moves = board.GetLegalMoves(cpuDisc);
+        SortByCoordinate(moves);
 
-        foreach (var move in board.GetLegalMoves(cpuDisc))
+        foreach (var move in moves)
         {
             if (HasTimedOut())
                 break;
 
-            // 元の盤面を壊さないよう、候補ごとに盤面を複製して探索します。
             var child = board.Clone();
-            child.TryApplyMove(move, cpuDisc);
-            var score = Minimax(child, BoardState.Opponent(cpuDisc), cpuDisc, depth - 1, int.MinValue + 1, int.MaxValue);
+            var result = child.TryApplyMove(move, cpuDisc);
+            if (result is null)
+                continue;
+
+            int score;
+            if (Difficulty == CpuDifficulty.Beginner)
+            {
+                // 初級は相手の応手を読まず、着手直後の分かりやすい成果を評価します。
+                score = EvaluateBeginnerMove(child, move, result.Flipped.Count, cpuDisc);
+            }
+            else
+            {
+                score = Minimax(
+                    child,
+                    BoardState.Opponent(cpuDisc),
+                    cpuDisc,
+                    depth - 1,
+                    int.MinValue + 1,
+                    int.MaxValue);
+            }
 
             if (_timedOut)
                 break;
 
+            // 同評価では先に調べた座標順の手を維持します。
             if (score > bestScore)
             {
                 bestScore = score;
-                bestMoves.Clear();
-                bestMoves.Add(move);
-            }
-            else if (score == bestScore)
-            {
-                bestMoves.Add(move);
+                bestMove = move;
             }
         }
 
-        return bestMoves;
+        return bestMove;
     }
 
     /// <summary>
     /// CPUは評価値を最大化し、人間は評価値を最小化すると仮定してゲーム木を探索します。
-    /// alphaとbetaにより、最終結果へ影響しない枝を省略します。
     /// </summary>
     private int Minimax(BoardState board, Disc player, Disc cpuDisc, int depth, int alpha, int beta)
     {
         if (HasTimedOut())
-            return Evaluate(board, cpuDisc);
+            return EvaluateStrategic(board, cpuDisc);
 
         if (board.IsGameOver() || depth <= 0)
-            return Evaluate(board, cpuDisc);
+            return EvaluateStrategic(board, cpuDisc);
 
         var moves = board.GetLegalMoves(player);
         if (moves.Count == 0)
-            // パスは着手ではないため探索深度を消費せず、相手へ手番だけ渡します。
+            // パスは着手ではないため探索深度を消費しません。
             return Minimax(board, BoardState.Opponent(player), cpuDisc, depth, alpha, beta);
 
+        SortByCoordinate(moves);
         var maximizing = player == cpuDisc;
         var best = maximizing ? int.MinValue : int.MaxValue;
 
@@ -143,7 +172,6 @@ public sealed class CpuPlayer
             }
 
             if (beta <= alpha)
-                // この先を読んでも親ノードの選択が変わらないため枝刈りします。
                 break;
         }
 
@@ -151,29 +179,38 @@ public sealed class CpuPlayer
     }
 
     /// <summary>
-    /// 思考時間の上限を確認し、超過していれば探索中断フラグを立てます。
+    /// 初心者が選びそうな、目先の成果を重視した着手評価を計算します。
     /// </summary>
-    private bool HasTimedOut()
+    private static int EvaluateBeginnerMove(
+        BoardState boardAfterMove,
+        BoardPosition move,
+        int flippedCount,
+        Disc cpuDisc)
     {
-        if (_stopwatch.Elapsed < _timeLimit)
-            return false;
+        var opponent = BoardState.Opponent(cpuDisc);
+        var discDifference = boardAfterMove.Count(cpuDisc) - boardAfterMove.Count(opponent);
+        var score = flippedCount * 20 + discDifference * 5;
 
-        _timedOut = true;
-        return true;
+        if (IsCorner(move))
+            score += 100;
+        if (IsEdge(move))
+            score += 15;
+        if (IsAdjacentToEmptyCorner(boardAfterMove, move))
+            score -= 5;
+
+        return score;
     }
 
     /// <summary>
-    /// CPUから見た局面の有利・不利を整数値で評価します。
-    /// 序盤・中盤・終盤で合法手、角、危険マス、石数の重みを切り替えます。
+    /// 中級・上級用に、局面全体の有利・不利を評価します。
     /// </summary>
-    private static int Evaluate(BoardState board, Disc cpuDisc)
+    private static int EvaluateStrategic(BoardState board, Disc cpuDisc)
     {
         var opponent = BoardState.Opponent(cpuDisc);
         var discDifference = board.Count(cpuDisc) - board.Count(opponent);
 
         if (board.IsGameOver())
         {
-            // 終局時の勝敗は通常の局面評価より常に優先される大きな値を使用します。
             var winner = board.GetWinner();
             if (winner == Disc.Empty)
                 return 0;
@@ -193,8 +230,56 @@ public sealed class CpuPlayer
     }
 
     /// <summary>
-    /// 指定プレイヤーが所有する角の数を返します。
+    /// 思考時間の上限を確認します。
     /// </summary>
+    private bool HasTimedOut()
+    {
+        if (_stopwatch.Elapsed < _timeLimit)
+            return false;
+
+        _timedOut = true;
+        return true;
+    }
+
+    private static void SortByCoordinate(List<BoardPosition> moves)
+    {
+        moves.Sort((left, right) =>
+        {
+            var yComparison = left.Y.CompareTo(right.Y);
+            return yComparison != 0 ? yComparison : left.X.CompareTo(right.X);
+        });
+    }
+
+    private static bool IsCorner(BoardPosition position)
+    {
+        return (position.X == 0 || position.X == 7)
+            && (position.Y == 0 || position.Y == 7);
+    }
+
+    private static bool IsEdge(BoardPosition position)
+    {
+        return position.X == 0 || position.X == 7 || position.Y == 0 || position.Y == 7;
+    }
+
+    /// <summary>
+    /// 着手位置が、まだ空いている角の隣接3マスに含まれるか判定します。
+    /// </summary>
+    private static bool IsAdjacentToEmptyCorner(BoardState board, BoardPosition position)
+    {
+        foreach (var corner in Corners)
+        {
+            if (board.GetCell(corner.X, corner.Y) != Disc.Empty)
+                continue;
+
+            if (Math.Abs(position.X - corner.X) <= 1
+                && Math.Abs(position.Y - corner.Y) <= 1
+                && position != corner)
+                return true;
+        }
+
+        return false;
+    }
+
     private static int CountCorners(BoardState board, Disc player)
     {
         var count = 0;
@@ -204,10 +289,6 @@ public sealed class CpuPlayer
         return count;
     }
 
-    /// <summary>
-    /// まだ取られていない角に隣接する危険マスを何個所有しているか数えます。
-    /// 角が取得済みなら、その角の周囲は危険マスとして数えません。
-    /// </summary>
     private static int CountDangerSquares(BoardState board, Disc player)
     {
         var count = 0;
