@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 
 namespace Othello;
 
@@ -25,10 +24,6 @@ public sealed class CpuPlayer
         new(0, 0), new(7, 0), new(0, 7), new(7, 7)
     };
 
-    private readonly TimeSpan _timeLimit;
-    private Stopwatch _stopwatch = new();
-    private bool _timedOut;
-
     /// <summary>現在選択されている難易度です。</summary>
     public CpuDifficulty Difficulty { get; }
 
@@ -43,10 +38,9 @@ public sealed class CpuPlayer
     /// <summary>
     /// 指定難易度のCPU探索器を生成します。
     /// </summary>
-    public CpuPlayer(CpuDifficulty difficulty, double timeLimitSeconds = 0.5)
+    public CpuPlayer(CpuDifficulty difficulty)
     {
         Difficulty = difficulty;
-        _timeLimit = TimeSpan.FromSeconds(timeLimitSeconds);
     }
 
     /// <summary>
@@ -61,23 +55,8 @@ public sealed class CpuPlayer
             return null;
 
         SortByCoordinate(legalMoves);
-        var bestMove = legalMoves[0];
-        _stopwatch = Stopwatch.StartNew();
-
-        // 浅い探索を必ず先に完了させることで、時間切れでも合法な予備手を返します。
-        for (var depth = 1; depth <= MaxDepth; depth++)
-        {
-            _timedOut = false;
-            var depthBest = SearchRoot(board, cpuDisc, depth);
-            if (_timedOut)
-                break;
-
-            if (depthBest.HasValue)
-                bestMove = depthBest.Value;
-        }
-
-        _stopwatch.Stop();
-        return bestMove;
+        // 時間依存で探索深度が変わらないよう、難易度ごとの固定深度を必ず探索します。
+        return SearchRoot(board, cpuDisc, MaxDepth) ?? legalMoves[0];
     }
 
     /// <summary>
@@ -92,9 +71,6 @@ public sealed class CpuPlayer
 
         foreach (var move in moves)
         {
-            if (HasTimedOut())
-                break;
-
             var child = board.Clone();
             var result = child.TryApplyMove(move, cpuDisc);
             if (result is null)
@@ -117,9 +93,6 @@ public sealed class CpuPlayer
                     int.MaxValue);
             }
 
-            if (_timedOut)
-                break;
-
             // 同評価では先に調べた座標順の手を維持します。
             if (score > bestScore)
             {
@@ -136,9 +109,6 @@ public sealed class CpuPlayer
     /// </summary>
     private int Minimax(BoardState board, Disc player, Disc cpuDisc, int depth, int alpha, int beta)
     {
-        if (HasTimedOut())
-            return EvaluateStrategic(board, cpuDisc);
-
         if (board.IsGameOver() || depth <= 0)
             return EvaluateStrategic(board, cpuDisc);
 
@@ -156,9 +126,6 @@ public sealed class CpuPlayer
             var child = board.Clone();
             child.TryApplyMove(move, player);
             var score = Minimax(child, BoardState.Opponent(player), cpuDisc, depth - 1, alpha, beta);
-
-            if (_timedOut)
-                return score;
 
             if (maximizing)
             {
@@ -227,18 +194,6 @@ public sealed class CpuPlayer
         if (empty >= 13)
             return mobilityDifference * 15 + cornerDifference * 120 - dangerDifference * 25 + discDifference * 3;
         return mobilityDifference * 5 + cornerDifference * 120 - dangerDifference * 10 + discDifference * 20;
-    }
-
-    /// <summary>
-    /// 思考時間の上限を確認します。
-    /// </summary>
-    private bool HasTimedOut()
-    {
-        if (_stopwatch.Elapsed < _timeLimit)
-            return false;
-
-        _timedOut = true;
-        return true;
     }
 
     private static void SortByCoordinate(List<BoardPosition> moves)
