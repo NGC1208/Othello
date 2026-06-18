@@ -12,25 +12,37 @@
 ## シーン構成
 
 ```text
-未定
+Main.tscn
+└─ Main (Control / Scripts/Main.cs)
+   ├─ 手番・石数・難易度・メッセージ表示（コード生成）
+   ├─ 難易度選択オーバーレイ（コード生成）
+   ├─ リザルトオーバーレイ（コード生成）
+   └─ 盤面・石・最終着手枠（_Drawで描画）
 ```
 
 ## 主要構成要素
 
-- ゲーム進行: 未定
-- 盤面状態: 未定
-- ルール判定: 未定
+- ゲーム進行: `Scripts/Main.cs`
+- 盤面状態: `Scripts/BoardState.cs`
+- ルール判定: `Scripts/BoardState.cs`
 - CPU AI: `02_Game_Design/cpu_ai.md`を正本とする。
-- UI: 未定
+- CPU実装: `Scripts/CpuPlayer.cs`
+- UI: `Scripts/Main.cs`でGodot標準Controlをコード生成する。
+- 自己テスト: `Scripts/RulesSelfTest.cs`
 - セーブ／設定: 初期版では実装しない。
 
 ## 依存関係のルール
 
-- 未定
+- `BoardState`はGodot APIへ依存しない。
+- `CpuPlayer`はGodot APIおよび画面ノードへ依存しない。
+- `Main`は表示と入力を担当し、ルール判定を`BoardState`へ委譲する。
+- CPU探索では実対局の盤面を変更せず、複製した盤面へ仮想着手する。
+- 外部ライブラリは追加せず、Godotと.NET標準機能だけを使用する。
 
 ## 設計上の制約
 
 - ルール判定と画面表示を分離する。
 - CPU AIは画面ノードに依存しない。
 - 盤面状態を入力として合法手と結果をテストできるようにする。
-- 未定
+- CPU思考は別スレッドで実行し、画面描画を停止させない。
+- 難易度未選択中はCPU思考と盤面入力を開始しない。

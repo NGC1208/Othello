@@ -4,10 +4,19 @@
 
 ## プロジェクト状況
 
-- フェーズ: 企画中
-- ゲームエンジン: Godot
+- フェーズ: 初期版実装済み・検証中
+- ゲームエンジン: Godot 4.6.3 stable Mono
 - 対応プラットフォーム: Windows
 - リリース形態: 未定
+
+## 現在の実装範囲
+
+- プレイヤー対CPU
+- 起動時の難易度選択（初級・中級・上級）
+- 標準的な8×8オセロルール
+- パス、終局、勝敗、再対局
+- マウス操作
+- BGM・効果音・セーブ機能なし
 
 ## 最初に読む文書
 
@@ -15,9 +24,15 @@
 - [[01_Vision/design_pillars|デザイン原則]]
 - [[02_Game_Design/core_loop|コアループ]]
 - [[02_Game_Design/game_rules|ゲームルール]]
+- [[02_Game_Design/cpu_ai|CPU AI仕様]]
+- [[02_Game_Design/ui_ux|UI / UX仕様]]
 - [[03_Technical/architecture|技術設計]]
+- [[03_Technical/testing_strategy|テスト戦略]]
 - [[04_Production/roadmap|ロードマップ]]
 - [[04_Production/definition_of_done|完成条件]]
+- [[04_Production/open_questions|未確定事項]]
+- [[05_Decisions/ADR-001_CPU難易度設計|CPU難易度の設計判断]]
+- [[06_Tasks/TASK-002_CPU難易度選択|CPU難易度選択タスク]]
 
 ## 運用ルール
 

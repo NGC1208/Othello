@@ -12,18 +12,25 @@ namespace Othello;
 /// </summary>
 public partial class Main : Control
 {
-    // 仕様書で定めた、装飾を抑えた盤面・背景・強調枠の配色です。
-    private readonly Color _boardColor = new("#178447");
+	// 仕様書で定めた、装飾を抑えた盤面・背景・強調枠の配色です。
+	private readonly Color _boardColor = new("#178447");
 	private readonly Color _gridColor = new("#082f1c");
 	private readonly Color _backgroundColor = new("#101820");
 	private readonly Color _lastMoveColor = new("#ffd54f");
 
-    // 対局状態とCPU思考器です。CPUは黒、人間は白で固定します。
-    private BoardState _board = new();
-	private readonly CpuPlayer _cpu = new();
+	// 対局状態です。CPUは黒、人間は白で固定します。
+	private BoardState _board = new();
+	private CpuPlayer? _cpu;
+	private CpuDifficulty? _selectedDifficulty;
 	private Label _turnLabel = null!;
 	private Label _scoreLabel = null!;
+	private Label _difficultyLabel = null!;
 	private Label _messageLabel = null!;
+	private ColorRect _difficultyOverlay = null!;
+	private Label _difficultyTitle = null!;
+	private Button _beginnerButton = null!;
+	private Button _intermediateButton = null!;
+	private Button _advancedButton = null!;
 	private ColorRect _resultOverlay = null!;
 	private Label _resultLabel = null!;
 	private Button _replayButton = null!;
@@ -35,22 +42,23 @@ public partial class Main : Control
 	private double _messageRemaining;
 	private bool _inputLocked;
 	private bool _gameOver;
-    private readonly Dictionary<BoardPosition, FlipAnimation> _flips = new();
+	private bool _awaitingDifficulty;
+	private readonly Dictionary<BoardPosition, FlipAnimation> _flips = new();
 
-    /// <summary>
-    /// 反転中の石について、反転前後の色と経過時間を保持します。
-    /// </summary>
-    private sealed class FlipAnimation
+	/// <summary>
+	/// 反転中の石について、反転前後の色と経過時間を保持します。
+	/// </summary>
+	private sealed class FlipAnimation
 	{
 		public Disc From { get; init; }
 		public Disc To { get; init; }
 		public double Elapsed { get; set; }
-    }
+	}
 
-    /// <summary>
-    /// 起動時に自己テストモードを判定し、通常時はUI生成後に新しい対局を開始します。
-    /// </summary>
-    public override void _Ready()
+	/// <summary>
+	/// 起動時に自己テストモードを判定し、通常時はUI生成後に新しい対局を開始します。
+	/// </summary>
+	public override void _Ready()
 	{
 		if (OS.GetCmdlineUserArgs().Contains("--self-test"))
 		{
@@ -70,17 +78,44 @@ public partial class Main : Control
 		SetProcess(true);
 		MouseFilter = MouseFilterEnum.Stop;
 		CreateInterface();
-		StartNewGame();
+		var requestedDifficulty = GetRequestedDifficulty();
+		if (requestedDifficulty.HasValue)
+			StartNewGame(requestedDifficulty.Value);
+		else
+			ShowDifficultyDialog();
 
 		if (OS.GetCmdlineUserArgs().Contains("--capture-preview"))
 			CapturePreview();
-    }
+	}
 
-    /// <summary>
-    /// 画面確認用のプレビュー画像を保存して終了します。
-    /// 通常プレイでは呼び出されません。
-    /// </summary>
-    private async void CapturePreview()
+	/// <summary>
+	/// 自動テスト・画面確認用の起動引数から難易度を取得します。
+	/// 通常起動では値がないため、難易度選択ダイアログが表示されます。
+	/// </summary>
+	private static CpuDifficulty? GetRequestedDifficulty()
+	{
+		foreach (var argument in OS.GetCmdlineUserArgs())
+		{
+			if (!argument.StartsWith("--difficulty=", StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			return argument["--difficulty=".Length..].ToLowerInvariant() switch
+			{
+				"beginner" => CpuDifficulty.Beginner,
+				"intermediate" => CpuDifficulty.Intermediate,
+				"advanced" => CpuDifficulty.Advanced,
+				_ => null
+			};
+		}
+
+		return null;
+	}
+
+	/// <summary>
+	/// 画面確認用のプレビュー画像を保存して終了します。
+	/// 通常プレイでは呼び出されません。
+	/// </summary>
+	private async void CapturePreview()
 	{
 		for (var i = 0; i < 90; i++)
 			await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -90,17 +125,35 @@ public partial class Main : Control
 		if (result != Error.Ok)
 			GD.PrintErr($"プレビュー画像の保存に失敗しました: {result}");
 		GetTree().Quit(result == Error.Ok ? 0 : 1);
-    }
+	}
 
-    /// <summary>
-    /// 手番・石数・メッセージ・リザルトのUI部品をコードから生成します。
-    /// </summary>
-    private void CreateInterface()
+	/// <summary>
+	/// 手番・石数・難易度選択・メッセージ・リザルトのUI部品をコードから生成します。
+	/// </summary>
+	private void CreateInterface()
 	{
 		_turnLabel = CreateLabel(26, HorizontalAlignment.Center);
 		_scoreLabel = CreateLabel(24, HorizontalAlignment.Center);
+		_difficultyLabel = CreateLabel(20, HorizontalAlignment.Center);
 		_messageLabel = CreateLabel(22, HorizontalAlignment.Center);
 		_messageLabel.Modulate = new Color("#ffe082");
+
+		_difficultyOverlay = new ColorRect
+		{
+			Color = new Color(0.02f, 0.03f, 0.04f, 0.96f),
+			Visible = false,
+			MouseFilter = MouseFilterEnum.Stop
+		};
+		AddChild(_difficultyOverlay);
+
+		_difficultyTitle = CreateLabel(32, HorizontalAlignment.Center, _difficultyOverlay);
+		_difficultyTitle.Text = "難易度を選択してください";
+		_beginnerButton = CreateButton("初級\n目先の石を多く取る初心者向け", _difficultyOverlay);
+		_intermediateButton = CreateButton("中級\n2手先を読む標準的な強さ", _difficultyOverlay);
+		_advancedButton = CreateButton("上級\n3手先を読む従来の強さ", _difficultyOverlay);
+		_beginnerButton.Pressed += () => StartNewGame(CpuDifficulty.Beginner);
+		_intermediateButton.Pressed += () => StartNewGame(CpuDifficulty.Intermediate);
+		_advancedButton.Pressed += () => StartNewGame(CpuDifficulty.Advanced);
 
 		_resultOverlay = new ColorRect
 		{
@@ -113,17 +166,17 @@ public partial class Main : Control
 		_resultLabel = CreateLabel(36, HorizontalAlignment.Center, _resultOverlay);
 		_replayButton = CreateButton("もう一度遊ぶ", _resultOverlay);
 		_quitButton = CreateButton("ゲームを終了", _resultOverlay);
-		_replayButton.Pressed += StartNewGame;
+		_replayButton.Pressed += ShowDifficultyDialog;
 		_quitButton.Pressed += () => GetTree().Quit();
 
 		Resized += LayoutInterface;
 		LayoutInterface();
-    }
+	}
 
-    /// <summary>
-    /// 共通設定を持つラベルを生成し、指定された親ノードへ追加します。
-    /// </summary>
-    private Label CreateLabel(int fontSize, HorizontalAlignment alignment, Control? parent = null)
+	/// <summary>
+	/// 共通設定を持つラベルを生成し、指定された親ノードへ追加します。
+	/// </summary>
+	private Label CreateLabel(int fontSize, HorizontalAlignment alignment, Control? parent = null)
 	{
 		var label = new Label
 		{
@@ -134,38 +187,55 @@ public partial class Main : Control
 		label.AddThemeFontSizeOverride("font_size", fontSize);
 		(parent ?? this).AddChild(label);
 		return label;
-    }
+	}
 
-    /// <summary>
-    /// リザルト画面で使用するボタンを生成します。
-    /// </summary>
-    private static Button CreateButton(string text, Control parent)
+	/// <summary>
+	/// リザルト画面で使用するボタンを生成します。
+	/// </summary>
+	private static Button CreateButton(string text, Control parent)
 	{
 		var button = new Button { Text = text };
 		button.AddThemeFontSizeOverride("font_size", 22);
 		parent.AddChild(button);
 		return button;
-    }
+	}
 
-    /// <summary>
-    /// ウィンドウサイズから盤面とUIの位置・大きさを再計算します。
-    /// 盤面は常に正方形を維持します。
-    /// </summary>
-    private void LayoutInterface()
+	/// <summary>
+	/// ウィンドウサイズから盤面とUIの位置・大きさを再計算します。
+	/// 盤面は常に正方形を維持します。
+	/// </summary>
+	private void LayoutInterface()
 	{
 		var size = Size;
-		var availableHeight = Math.Max(320f, size.Y - 170f);
+		var availableHeight = Math.Max(320f, size.Y - 195f);
 		var availableWidth = Math.Max(320f, size.X - 80f);
 		_cellSize = MathF.Floor(MathF.Min(availableWidth / 8f, availableHeight / 8f));
 		var boardPixels = _cellSize * 8f;
-		_boardRect = new Rect2((size.X - boardPixels) / 2f, 105f, boardPixels, boardPixels);
+		_boardRect = new Rect2((size.X - boardPixels) / 2f, 120f, boardPixels, boardPixels);
 
 		_turnLabel.Position = new Vector2(20, 14);
 		_turnLabel.Size = new Vector2(size.X - 40, 38);
 		_scoreLabel.Position = new Vector2(20, 52);
 		_scoreLabel.Size = new Vector2(size.X - 40, 34);
+		_difficultyLabel.Position = new Vector2(20, 82);
+		_difficultyLabel.Size = new Vector2(size.X - 40, 28);
 		_messageLabel.Position = new Vector2(20, Math.Min(size.Y - 55f, _boardRect.End.Y + 8f));
 		_messageLabel.Size = new Vector2(size.X - 40, 40);
+
+		var difficultyWidth = Math.Min(600f, size.X - 40f);
+		var difficultyHeight = Math.Min(430f, size.Y - 40f);
+		_difficultyOverlay.Position = new Vector2(
+			(size.X - difficultyWidth) / 2f,
+			(size.Y - difficultyHeight) / 2f);
+		_difficultyOverlay.Size = new Vector2(difficultyWidth, difficultyHeight);
+		_difficultyTitle.Position = new Vector2(20, 24);
+		_difficultyTitle.Size = new Vector2(difficultyWidth - 40, 60);
+		_beginnerButton.Position = new Vector2(60, 105);
+		_beginnerButton.Size = new Vector2(difficultyWidth - 120, 75);
+		_intermediateButton.Position = new Vector2(60, 195);
+		_intermediateButton.Size = new Vector2(difficultyWidth - 120, 75);
+		_advancedButton.Position = new Vector2(60, 285);
+		_advancedButton.Size = new Vector2(difficultyWidth - 120, 75);
 
 		var overlayWidth = Math.Min(520f, size.X - 40f);
 		var overlayHeight = 310f;
@@ -178,30 +248,55 @@ public partial class Main : Control
 		_quitButton.Position = new Vector2(60, 240);
 		_quitButton.Size = new Vector2(overlayWidth - 120, 48);
 		QueueRedraw();
-    }
+	}
 
-    /// <summary>
-    /// 盤面と一時状態を初期化し、黒CPUの初手から新しい対局を始めます。
-    /// </summary>
-    private void StartNewGame()
+	/// <summary>
+	/// 対局を停止して難易度選択ダイアログを表示します。
+	/// </summary>
+	private void ShowDifficultyDialog()
 	{
 		_board = new BoardState();
+		_cpu = null;
+		_selectedDifficulty = null;
+		_flips.Clear();
+		_cpuTask = null;
+		_messageRemaining = 0;
+		_inputLocked = true;
+		_gameOver = false;
+		_awaitingDifficulty = true;
+		_resultOverlay.Visible = false;
+		_difficultyOverlay.Visible = true;
+		_messageLabel.Text = "";
+		UpdateStatus();
+		QueueRedraw();
+	}
+
+	/// <summary>
+	/// 選択された難易度で盤面を初期化し、黒CPUの初手から対局を始めます。
+	/// </summary>
+	private void StartNewGame(CpuDifficulty difficulty)
+	{
+		_board = new BoardState();
+		_cpu = new CpuPlayer(difficulty);
+		_selectedDifficulty = difficulty;
 		_flips.Clear();
 		_cpuTask = null;
 		_cpuStartDelay = 0.35;
 		_messageRemaining = 0;
 		_inputLocked = true;
 		_gameOver = false;
+		_awaitingDifficulty = false;
 		_resultOverlay.Visible = false;
+		_difficultyOverlay.Visible = false;
 		_messageLabel.Text = "";
 		UpdateStatus();
 		QueueRedraw();
-    }
+	}
 
-    /// <summary>
-    /// メッセージ表示、反転演出、非同期CPU探索をフレームごとに進めます。
-    /// </summary>
-    public override void _Process(double delta)
+	/// <summary>
+	/// メッセージ表示、反転演出、非同期CPU探索をフレームごとに進めます。
+	/// </summary>
+	public override void _Process(double delta)
 	{
 		if (_messageRemaining > 0)
 		{
@@ -212,7 +307,7 @@ public partial class Main : Control
 
 		UpdateFlipAnimations(delta);
 
-		if (_gameOver || _flips.Count > 0)
+		if (_awaitingDifficulty || _gameOver || _flips.Count > 0)
 			return;
 
 		if (_board.CurrentPlayer == Disc.Black)
@@ -224,11 +319,11 @@ public partial class Main : Control
 				return;
 			}
 
-            if (_cpuTask is null)
-            {
-                // 画面を止めないよう、CPU探索は盤面の複製を使って別スレッドで実行します。
-                var snapshot = _board.Clone();
-				_cpuTask = Task.Run(() => _cpu.ChooseMove(snapshot, Disc.Black));
+			if (_cpuTask is null)
+			{
+				// 画面を止めないよう、CPU探索は盤面の複製を使って別スレッドで実行します。
+				var snapshot = _board.Clone();
+				_cpuTask = Task.Run(() => _cpu!.ChooseMove(snapshot, Disc.Black));
 			}
 			else if (_cpuTask.IsCompleted)
 			{
@@ -244,12 +339,12 @@ public partial class Main : Control
 		{
 			_inputLocked = false;
 		}
-    }
+	}
 
-    /// <summary>
-    /// 0.2秒の石反転アニメーションを更新し、完了後に次の手番処理へ進みます。
-    /// </summary>
-    private void UpdateFlipAnimations(double delta)
+	/// <summary>
+	/// 0.2秒の石反転アニメーションを更新し、完了後に次の手番処理へ進みます。
+	/// </summary>
+	private void UpdateFlipAnimations(double delta)
 	{
 		if (_flips.Count == 0)
 			return;
@@ -265,15 +360,15 @@ public partial class Main : Control
 
 		if (_flips.Count == 0)
 			ContinueTurnFlow();
-    }
+	}
 
-    /// <summary>
-    /// 人間の左クリックを盤面座標へ変換し、合法手の場合だけ着手します。
-    /// 非合法手は仕様どおり無反応です。
-    /// </summary>
-    public override void _GuiInput(InputEvent @event)
+	/// <summary>
+	/// 人間の左クリックを盤面座標へ変換し、合法手の場合だけ着手します。
+	/// 非合法手は仕様どおり無反応です。
+	/// </summary>
+	public override void _GuiInput(InputEvent @event)
 	{
-		if (_inputLocked || _gameOver || _board.CurrentPlayer != Disc.White)
+		if (_awaitingDifficulty || _inputLocked || _gameOver || _board.CurrentPlayer != Disc.White)
 			return;
 
 		if (@event is not InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } mouse)
@@ -288,12 +383,12 @@ public partial class Main : Control
 
 		if (_board.IsLegalMove(position, Disc.White))
 			ApplyMove(position, Disc.White);
-    }
+	}
 
-    /// <summary>
-    /// 盤面へ着手を反映し、反転対象のアニメーションを開始します。
-    /// </summary>
-    private void ApplyMove(BoardPosition position, Disc player)
+	/// <summary>
+	/// 盤面へ着手を反映し、反転対象のアニメーションを開始します。
+	/// </summary>
+	private void ApplyMove(BoardPosition position, Disc player)
 	{
 		var result = _board.TryApplyMove(position, player);
 		if (result is null)
@@ -309,12 +404,12 @@ public partial class Main : Control
 
 		if (_flips.Count == 0)
 			ContinueTurnFlow();
-    }
+	}
 
-    /// <summary>
-    /// 反転完了後に終局・パス・次の通常手番を判定します。
-    /// </summary>
-    private void ContinueTurnFlow()
+	/// <summary>
+	/// 反転完了後に終局・パス・次の通常手番を判定します。
+	/// </summary>
+	private void ContinueTurnFlow()
 	{
 		if (_board.IsGameOver())
 		{
@@ -335,13 +430,13 @@ public partial class Main : Control
 			_inputLocked = false;
 
 		UpdateStatus();
-    }
+	}
 
-    /// <summary>
-    /// パスメッセージを約1秒表示し、相手へ手番を渡します。
-    /// 相手にも合法手がなければその場で終局します。
-    /// </summary>
-    private void HandlePass(Disc player)
+	/// <summary>
+	/// パスメッセージを約1秒表示し、相手へ手番を渡します。
+	/// 相手にも合法手がなければその場で終局します。
+	/// </summary>
+	private void HandlePass(Disc player)
 	{
 		_messageLabel.Text = player == Disc.White
 			? "あなたは置ける場所がないためパスします"
@@ -363,12 +458,12 @@ public partial class Main : Control
 			_inputLocked = false;
 
 		UpdateStatus();
-    }
+	}
 
-    /// <summary>
-    /// 勝敗と最終石数をリザルト表示へ反映し、対局操作を停止します。
-    /// </summary>
-    private void ShowResult()
+	/// <summary>
+	/// 勝敗と最終石数をリザルト表示へ反映し、対局操作を停止します。
+	/// </summary>
+	private void ShowResult()
 	{
 		_gameOver = true;
 		_inputLocked = true;
@@ -377,24 +472,41 @@ public partial class Main : Control
 		_resultLabel.Text = $"{result}\n黒 {_board.Count(Disc.Black)} － {_board.Count(Disc.White)} 白";
 		_resultOverlay.Visible = true;
 		UpdateStatus();
-    }
+	}
 
-    /// <summary>
-    /// 現在の手番と黒白の石数を画面上部へ反映します。
-    /// </summary>
-    private void UpdateStatus()
+	/// <summary>
+	/// 現在の手番と黒白の石数を画面上部へ反映します。
+	/// </summary>
+	private void UpdateStatus()
 	{
 		_turnLabel.Text = _gameOver
 			? "対局終了"
+			: _awaitingDifficulty ? "対局開始前"
 			: _board.CurrentPlayer == Disc.Black ? "CPUの手番" : "あなたの手番";
 		_scoreLabel.Text = $"黒（CPU） {_board.Count(Disc.Black)}　　白（あなた） {_board.Count(Disc.White)}";
-    }
+		_difficultyLabel.Text = _selectedDifficulty.HasValue
+			? $"難易度：{DifficultyName(_selectedDifficulty.Value)}"
+			: "難易度：未選択";
+	}
 
-    /// <summary>
-    /// 背景、盤面、格子、石、最後の着手枠を描画します。
-    /// 外部画像素材は使用しません。
-    /// </summary>
-    public override void _Draw()
+	/// <summary>
+	/// 内部の難易度値を画面表示用の日本語へ変換します。
+	/// </summary>
+	private static string DifficultyName(CpuDifficulty difficulty)
+	{
+		return difficulty switch
+		{
+			CpuDifficulty.Beginner => "初級",
+			CpuDifficulty.Intermediate => "中級",
+			_ => "上級"
+		};
+	}
+
+	/// <summary>
+	/// 背景、盤面、格子、石、最後の着手枠を描画します。
+	/// 外部画像素材は使用しません。
+	/// </summary>
+	public override void _Draw()
 	{
 		DrawRect(new Rect2(Vector2.Zero, Size), _backgroundColor);
 		DrawRect(_boardRect, _boardColor);
@@ -415,13 +527,13 @@ public partial class Main : Control
 			var rect = CellRect(last.X, last.Y).Grow(-4);
 			DrawRect(rect, _lastMoveColor, false, 4);
 		}
-    }
+	}
 
-    /// <summary>
-    /// 指定マスの石を描画します。
-    /// 反転中は横方向の縮小と色の切り替えで裏返る動きを表現します。
-    /// </summary>
-    private void DrawDisc(int x, int y, Disc disc)
+	/// <summary>
+	/// 指定マスの石を描画します。
+	/// 反転中は横方向の縮小と色の切り替えで裏返る動きを表現します。
+	/// </summary>
+	private void DrawDisc(int x, int y, Disc disc)
 	{
 		if (disc == Disc.Empty)
 			return;
@@ -443,12 +555,12 @@ public partial class Main : Control
 		DrawCircle(Vector2.Zero, radius, shownDisc == Disc.Black ? Colors.Black : new Color("#f4f4ef"));
 		DrawCircle(Vector2.Zero, radius, new Color(0, 0, 0, 0.45f), false, 2);
 		DrawSetTransform(Vector2.Zero, 0, Vector2.One);
-    }
+	}
 
-    /// <summary>
-    /// 盤面座標から画面上のマス領域を計算します。
-    /// </summary>
-    private Rect2 CellRect(int x, int y)
+	/// <summary>
+	/// 盤面座標から画面上のマス領域を計算します。
+	/// </summary>
+	private Rect2 CellRect(int x, int y)
 	{
 		return new Rect2(
 			_boardRect.Position + new Vector2(x * _cellSize, y * _cellSize),
