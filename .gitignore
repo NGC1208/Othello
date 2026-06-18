@@ -1,0 +1,7 @@
+.godot/
+.mono/
+bin/
+obj/
+preview.png
+Doc/.obsidian/workspace.json
+Doc/.obsidian/workspace-mobile.json
