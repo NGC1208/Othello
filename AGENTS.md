@@ -83,7 +83,7 @@
 - `Main.tscn`: メインシーン
 - `Scripts/Main.cs`: UI、入力、ゲーム進行、難易度選択、演出、リザルト
 - `Scripts/BoardState.cs`: 盤面状態、合法手、反転、パス、終局、勝敗
-- `Scripts/CpuPlayer.cs`: 難易度別評価、反復深化、ミニマックス、α-β枝刈り
+- `Scripts/CpuPlayer.cs`: 難易度別評価、固定深度ミニマックス、α-β枝刈り
 - `Scripts/RulesSelfTest.cs`: ヘッドレス自己テスト
 
 ## 実装原則

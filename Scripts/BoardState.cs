@@ -84,6 +84,20 @@ public sealed class BoardState
     }
 
     /// <summary>
+    /// 自動テスト用に任意配置の盤面を生成します。
+    /// 入力配列は複製するため、生成後に呼び出し側から変更されません。
+    /// </summary>
+    internal static BoardState CreateForTesting(Disc[,] cells, Disc currentPlayer)
+    {
+        if (cells.GetLength(0) != Size || cells.GetLength(1) != Size)
+            throw new ArgumentException("テスト盤面は8×8である必要があります。", nameof(cells));
+        if (currentPlayer == Disc.Empty)
+            throw new ArgumentException("手番に空きマスは指定できません。", nameof(currentPlayer));
+
+        return new BoardState((Disc[,])cells.Clone(), currentPlayer, null);
+    }
+
+    /// <summary>
     /// 盤面を標準の初期配置へ戻し、黒を先手に設定します。
     /// </summary>
     public void Reset()

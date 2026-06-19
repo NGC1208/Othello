@@ -60,13 +60,27 @@ public static class RulesSelfTest
     /// <summary>複数着手後も合法手判定が継続して機能することを確認します。</summary>
     private static void TestMultipleDirectionFlip()
     {
-        var board = new BoardState();
-        board.TryApplyMove(new BoardPosition(2, 3), Disc.Black);
-        board.TryApplyMove(new BoardPosition(2, 2), Disc.White);
-        board.TryApplyMove(new BoardPosition(3, 2), Disc.Black);
-        board.TryApplyMove(new BoardPosition(4, 2), Disc.White);
-        var moves = board.GetLegalMoves(Disc.Black);
-        Assert(moves.Count > 0, "複数手進行後も合法手を取得");
+        var cells = new Disc[BoardState.Size, BoardState.Size];
+
+        // D4へ黒を置くと、上下左右の白石を同時に反転する配置です。
+        cells[3, 1] = Disc.Black;
+        cells[3, 2] = Disc.White;
+        cells[1, 3] = Disc.Black;
+        cells[2, 3] = Disc.White;
+        cells[4, 3] = Disc.White;
+        cells[5, 3] = Disc.Black;
+        cells[3, 4] = Disc.White;
+        cells[3, 5] = Disc.Black;
+
+        var board = BoardState.CreateForTesting(cells, Disc.Black);
+        var result = board.TryApplyMove(new BoardPosition(3, 3), Disc.Black);
+
+        Assert(result is not null, "D4へ複数方向の着手が成立");
+        Assert(result!.Flipped.Count == 4, "上下左右の4枚を同時に反転");
+        Assert(board.GetCell(3, 2) == Disc.Black, "上方向を反転");
+        Assert(board.GetCell(2, 3) == Disc.Black, "左方向を反転");
+        Assert(board.GetCell(4, 3) == Disc.Black, "右方向を反転");
+        Assert(board.GetCell(3, 4) == Disc.Black, "下方向を反転");
     }
 
     /// <summary>全難易度の探索深度と合法手選択を確認します。</summary>

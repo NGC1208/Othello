@@ -40,6 +40,8 @@ public partial class Main : Control
 	private Task<BoardPosition?>? _cpuTask;
 	private double _cpuStartDelay;
 	private double _messageRemaining;
+	private double _passDelayRemaining;
+	private Disc? _pendingPassNextPlayer;
 	private bool _inputLocked;
 	private bool _gameOver;
 	private bool _awaitingDifficulty;
@@ -261,6 +263,8 @@ public partial class Main : Control
 		_flips.Clear();
 		_cpuTask = null;
 		_messageRemaining = 0;
+		_passDelayRemaining = 0;
+		_pendingPassNextPlayer = null;
 		_inputLocked = true;
 		_gameOver = false;
 		_awaitingDifficulty = true;
@@ -283,6 +287,8 @@ public partial class Main : Control
 		_cpuTask = null;
 		_cpuStartDelay = 0.35;
 		_messageRemaining = 0;
+		_passDelayRemaining = 0;
+		_pendingPassNextPlayer = null;
 		_inputLocked = true;
 		_gameOver = false;
 		_awaitingDifficulty = false;
@@ -310,6 +316,14 @@ public partial class Main : Control
 		if (_awaitingDifficulty || _gameOver || _flips.Count > 0)
 			return;
 
+		if (_pendingPassNextPlayer.HasValue)
+		{
+			_passDelayRemaining -= delta;
+			if (_passDelayRemaining <= 0)
+				CompletePendingPass();
+			return;
+		}
+
 		if (_board.CurrentPlayer == Disc.Black)
 		{
 			_inputLocked = true;
@@ -327,7 +341,18 @@ public partial class Main : Control
 			}
 			else if (_cpuTask.IsCompleted)
 			{
-				var move = _cpuTask.Result;
+				BoardPosition? move;
+				if (_cpuTask.IsFaulted || _cpuTask.IsCanceled)
+				{
+					if (_cpuTask.Exception is not null)
+						GD.PrintErr($"CPU思考中に例外が発生しました: {_cpuTask.Exception.GetBaseException()}");
+					move = GetFallbackCpuMove();
+				}
+				else
+				{
+					move = _cpuTask.Result;
+				}
+
 				_cpuTask = null;
 				if (move.HasValue)
 					ApplyMove(move.Value, Disc.Black);
@@ -444,20 +469,45 @@ public partial class Main : Control
 		_messageRemaining = 1.0;
 
 		var next = BoardState.Opponent(player);
-		_board.SetCurrentPlayer(next);
-
 		if (_board.MustPass(next))
 		{
 			ShowResult();
 			return;
 		}
 
+		_inputLocked = true;
+		_pendingPassNextPlayer = next;
+		_passDelayRemaining = 1.0;
+	}
+
+	/// <summary>
+	/// パスメッセージの表示時間が終わった後に、相手へ手番を移します。
+	/// </summary>
+	private void CompletePendingPass()
+	{
+		if (!_pendingPassNextPlayer.HasValue)
+			return;
+
+		var next = _pendingPassNextPlayer.Value;
+		_pendingPassNextPlayer = null;
+		_passDelayRemaining = 0;
+		_board.SetCurrentPlayer(next);
+
 		if (next == Disc.Black)
-			_cpuStartDelay = 1.0;
+			_cpuStartDelay = 0.25;
 		else
 			_inputLocked = false;
 
 		UpdateStatus();
+	}
+
+	/// <summary>
+	/// CPU思考が例外終了した場合に、現在盤面の先頭合法手を予備手として返します。
+	/// </summary>
+	private BoardPosition? GetFallbackCpuMove()
+	{
+		var legalMoves = _board.GetLegalMoves(Disc.Black);
+		return legalMoves.Count > 0 ? legalMoves[0] : null;
 	}
 
 	/// <summary>
