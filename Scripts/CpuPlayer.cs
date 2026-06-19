@@ -18,6 +18,38 @@ public enum CpuDifficulty
 /// </summary>
 public sealed class CpuPlayer
 {
+    // 初級評価：目先の成果を重視する初心者らしい判断傾向です。
+    private const int BeginnerFlipWeight = 20;
+    private const int BeginnerDiscDifferenceWeight = 5;
+    private const int BeginnerCornerBonus = 100;
+    private const int BeginnerEdgeBonus = 15;
+    private const int BeginnerDangerSquarePenalty = 5;
+
+    // 戦略評価：局面の進行度を空きマス数で区分します。
+    private const int OpeningMinimumEmptyCount = 41;
+    private const int MiddleGameMinimumEmptyCount = 13;
+
+    // 序盤は石数より合法手の多さを重視します。
+    private const int OpeningMobilityWeight = 20;
+    private const int OpeningCornerWeight = 100;
+    private const int OpeningDangerSquarePenalty = 30;
+    private const int OpeningDiscDifferenceWeight = 1;
+
+    // 中盤は角の価値を上げつつ、合法手と石数の両方を評価します。
+    private const int MiddleGameMobilityWeight = 15;
+    private const int MiddleGameCornerWeight = 120;
+    private const int MiddleGameDangerSquarePenalty = 25;
+    private const int MiddleGameDiscDifferenceWeight = 3;
+
+    // 終盤は最終結果へ直結する石数差を大きく評価します。
+    private const int EndGameMobilityWeight = 5;
+    private const int EndGameCornerWeight = 120;
+    private const int EndGameDangerSquarePenalty = 10;
+    private const int EndGameDiscDifferenceWeight = 20;
+
+    // 非終局評価を必ず上回る値で、勝敗を最優先します。
+    private const int TerminalWinScore = 1_000_000;
+
     // 評価関数で特に価値が高い盤面四隅の座標です。
     private static readonly BoardPosition[] Corners =
     {
@@ -156,14 +188,15 @@ public sealed class CpuPlayer
     {
         var opponent = BoardState.Opponent(cpuDisc);
         var discDifference = boardAfterMove.Count(cpuDisc) - boardAfterMove.Count(opponent);
-        var score = flippedCount * 20 + discDifference * 5;
+        var score = flippedCount * BeginnerFlipWeight
+            + discDifference * BeginnerDiscDifferenceWeight;
 
         if (IsCorner(move))
-            score += 100;
+            score += BeginnerCornerBonus;
         if (IsEdge(move))
-            score += 15;
+            score += BeginnerEdgeBonus;
         if (IsAdjacentToEmptyCorner(boardAfterMove, move))
-            score -= 5;
+            score -= BeginnerDangerSquarePenalty;
 
         return score;
     }
@@ -181,7 +214,9 @@ public sealed class CpuPlayer
             var winner = board.GetWinner();
             if (winner == Disc.Empty)
                 return 0;
-            return winner == cpuDisc ? 1_000_000 + discDifference : -1_000_000 + discDifference;
+            return winner == cpuDisc
+                ? TerminalWinScore + discDifference
+                : -TerminalWinScore + discDifference;
         }
 
         var empty = board.Count(Disc.Empty);
@@ -189,11 +224,26 @@ public sealed class CpuPlayer
         var cornerDifference = CountCorners(board, cpuDisc) - CountCorners(board, opponent);
         var dangerDifference = CountDangerSquares(board, cpuDisc) - CountDangerSquares(board, opponent);
 
-        if (empty >= 41)
-            return mobilityDifference * 20 + cornerDifference * 100 - dangerDifference * 30 + discDifference;
-        if (empty >= 13)
-            return mobilityDifference * 15 + cornerDifference * 120 - dangerDifference * 25 + discDifference * 3;
-        return mobilityDifference * 5 + cornerDifference * 120 - dangerDifference * 10 + discDifference * 20;
+        if (empty >= OpeningMinimumEmptyCount)
+        {
+            return mobilityDifference * OpeningMobilityWeight
+                + cornerDifference * OpeningCornerWeight
+                - dangerDifference * OpeningDangerSquarePenalty
+                + discDifference * OpeningDiscDifferenceWeight;
+        }
+
+        if (empty >= MiddleGameMinimumEmptyCount)
+        {
+            return mobilityDifference * MiddleGameMobilityWeight
+                + cornerDifference * MiddleGameCornerWeight
+                - dangerDifference * MiddleGameDangerSquarePenalty
+                + discDifference * MiddleGameDiscDifferenceWeight;
+        }
+
+        return mobilityDifference * EndGameMobilityWeight
+            + cornerDifference * EndGameCornerWeight
+            - dangerDifference * EndGameDangerSquarePenalty
+            + discDifference * EndGameDiscDifferenceWeight;
     }
 
     private static void SortByCoordinate(List<BoardPosition> moves)

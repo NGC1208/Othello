@@ -354,10 +354,22 @@ public partial class Main : Control
 				}
 
 				_cpuTask = null;
-				if (move.HasValue)
+				if (move.HasValue && _board.IsLegalMove(move.Value, Disc.Black))
+				{
 					ApplyMove(move.Value, Disc.Black);
-				else
+				}
+				else if (_board.MustPass(Disc.Black))
+				{
 					HandlePass(Disc.Black);
+				}
+				else
+				{
+					var fallback = GetFallbackCpuMove();
+					if (fallback.HasValue)
+						ApplyMove(fallback.Value, Disc.Black);
+					else
+						ShowCpuFailure();
+				}
 			}
 		}
 		else
@@ -508,6 +520,22 @@ public partial class Main : Control
 	{
 		var legalMoves = _board.GetLegalMoves(Disc.Black);
 		return legalMoves.Count > 0 ? legalMoves[0] : null;
+	}
+
+	/// <summary>
+	/// CPU処理から合法な着手へ復旧できない場合、プレイヤーへ通知して対局を安全に停止します。
+	/// </summary>
+	private void ShowCpuFailure()
+	{
+		GD.PrintErr("CPU処理に失敗し、合法な予備手へ復旧できませんでした。");
+		_gameOver = true;
+		_inputLocked = true;
+		_pendingPassNextPlayer = null;
+		_passDelayRemaining = 0;
+		_messageLabel.Text = "";
+		_resultLabel.Text = "CPUの処理に失敗しました\nもう一度対局を開始してください";
+		_resultOverlay.Visible = true;
+		UpdateStatus();
 	}
 
 	/// <summary>
