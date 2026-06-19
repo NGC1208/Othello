@@ -2,8 +2,7 @@
 
 ## 開発環境
 
-- Godotバージョン: Godot 4.6.3 stable Mono
-- 使用言語: C#
+- 詳細: [[development_environment|開発環境]]
 - 描画方式: 2D
 - 対応プラットフォーム: Windows
 - 基準解像度: 1280 × 720
