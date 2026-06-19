@@ -31,13 +31,17 @@
 - [[04_Production/roadmap|ロードマップ]]
 - [[04_Production/definition_of_done|完成条件]]
 - [[04_Production/open_questions|未確定事項]]
-- [[05_Decisions/ADR-001_CPU難易度設計|CPU難易度の設計判断]]
+- [[05_Decisions/README|Decision Records]]
+- [[05_Decisions/Design/DDR-001_CPU難易度方針|DDR-001 CPU難易度方針]]
+- [[05_Decisions/Architecture/ADR-001_CPU難易度実装方式|ADR-001 CPU難易度実装方式]]
 - [[06_Tasks/TASK-002_CPU難易度選択|CPU難易度選択タスク]]
 
 ## 運用ルール
 
 - 確定した仕様とアイデアを区別する。
 - 同じ仕様を複数箇所に重複して書かない。
-- 重要な設計変更は `05_Decisions` に記録する。
+- 重要な企画判断は `05_Decisions/Design` のDDRへ記録する。
+- DDRを実現する重要な技術判断は `05_Decisions/Architecture` のADRへ記録する。
+- 開発は `DDR → 必要ならADR → Task → Code / Tests` の順で進める。
 - 実装作業は `06_Tasks` のタスク単位で行う。
 - 未確定事項には「未定」と記載する。
